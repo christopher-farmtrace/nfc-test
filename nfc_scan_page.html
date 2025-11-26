@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NFC Scanner</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      background: #f4f4f4;
+    }
+    #status {
+      padding: 10px;
+      background: white;
+      border-radius: 8px;
+      margin-top: 20px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    button {
+      padding: 12px 20px;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      cursor: pointer;
+      background: #007bff;
+      color: white;
+    }
+  </style>
+</head>
+<body>
+  <h1>NFC Card Scanner</h1>
+  <p>Tap the button and then hold an NFC card near your phone.</p>
+
+  <button id="scanButton">Start NFC Scan</button>
+
+  <div id="status">Waiting for scan...</div>
+
+  <script>
+    const statusDiv = document.getElementById('status');
+    const scanButton = document.getElementById('scanButton');
+
+    if (!('NDEFReader' in window)) {
+      statusDiv.innerText = 'NFC is not supported on this device/browser.';
+      scanButton.disabled = true;
+    }
+
+    scanButton.addEventListener('click', async () => {
+      try {
+        const reader = new NDEFReader();
+        await reader.scan();
+        statusDiv.innerText = 'Scanning... Hold card near your phone.';
+
+        reader.addEventListener('reading', event => {
+          const { serialNumber, message } = event;
+          let output = `Card UID: ${serialNumber}`;
+
+          for (const record of message.records) {
+            try {
+              const textDecoder = new TextDecoder(record.encoding || 'utf-8');
+              output += `\nRecord (${record.recordType}): ${textDecoder.decode(record.data)}`;
+            } catch (e) {
+              output += `\nRecord (${record.recordType}): [Non-text data]`;
+            }
+          }
+
+          statusDiv.innerText = output;
+        });
+
+      } catch (error) {
+        statusDiv.innerText = 'Error: ' + error;
+      }
+    });
+  </script>
+</body>
+</html>
