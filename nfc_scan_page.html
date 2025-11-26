@@ -32,7 +32,9 @@
   <h1>NFC Card Scanner</h1>
   <p>Tap the button and then hold an NFC card near your phone.</p>
 
-  <button id="scanButton">Start NFC Scan</button>
+  <input id="textToWrite" type="text" placeholder="Enter text to write" style="padding:10px;width:80%;max-width:300px;margin-right:10px;border-radius:8px;border:1px solid #ccc;">
+
+<button id="scanButton">Start NFC Scan</button>
 
   <div id="status">Waiting for scan...</div>
 
@@ -71,6 +73,58 @@
         statusDiv.innerText = 'Error: ' + error;
       }
     });
-  </script>
+    // Write button
+  const writeButton = document.createElement('button');
+  writeButton.innerText = 'Write to NFC Tag';
+  writeButton.style.marginLeft = '10px';
+  document.body.insertBefore(writeButton, statusDiv);
+
+  writeButton.addEventListener('click', async () => {
+    try {
+      const writer = new NDEFReader();
+      await writer.write({
+        records: [
+          {
+            recordType: 'text',
+            data: 'Hello from Web NFC!'
+          }
+        ]
+      });
+      statusDiv.innerText = 'Write complete! Tap a tag again to verify.';
+    } catch (error) {
+      statusDiv.innerText = 'Write error: ' + error;
+    }
+  });
+
+  // Write button added
+  const writeButton = document.createElement('button');
+  writeButton.innerText = 'Write to NFC Tag';
+  writeButton.style.marginLeft = '10px';
+  scanButton.insertAdjacentElement('afterend', writeButton);
+
+  writeButton.addEventListener('click', async () => {
+    const textField = document.getElementById('textToWrite');
+    const text = textField.value.trim();
+    if (!text) {
+      statusDiv.innerText = 'Please enter text to write.';
+      return;
+    }
+    try {
+      const writer = new NDEFReader();
+      await writer.write({
+        records: [
+          {
+            recordType: 'text',
+            data: text
+          }
+        ]
+      });
+      statusDiv.innerText = 'Write complete! Tag now contains: "' + text + '"';
+    } catch (error) {
+      statusDiv.innerText = 'Write error: ' + error;
+    }
+  });
+
+</script>
 </body>
 </html>
