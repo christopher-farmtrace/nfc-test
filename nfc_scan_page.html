@@ -77,18 +77,29 @@
 
     #scanButton {
       background: #007bff;
+      /* Blue */
     }
 
-    /* Blue for NFC */
-    #scanButton:disabled {
+    #rapidScanButton {
+      background: #6f42c1;
+      /* Purple */
+    }
+
+    #rapidScanButton.scanning {
+      background: #dc3545;
+      /* Red (Stop) */
+      animation: pulse 2s infinite;
+    }
+
+    #scanButton:disabled,
+    #rapidScanButton:disabled {
       background: #ccc;
     }
 
     #manualSubmit {
       background: #28a745;
+      /* Green */
     }
-
-    /* Green for Manual */
 
     /* Testing Section */
     .testing-section {
@@ -98,6 +109,7 @@
       border-radius: 8px;
     }
 
+    /* Logs */
     #status {
       margin-top: 20px;
       padding: 10px;
@@ -105,6 +117,36 @@
       border-radius: 4px;
       white-space: pre-wrap;
       word-break: break-all;
+      font-weight: bold;
+    }
+
+    #scanLog {
+      list-style: none;
+      padding: 0;
+      margin-top: 10px;
+      max-height: 200px;
+      overflow-y: auto;
+      border-top: 1px solid #ddd;
+    }
+
+    #scanLog li {
+      padding: 8px;
+      border-bottom: 1px solid #eee;
+      font-size: 0.9em;
+    }
+
+    @keyframes pulse {
+      0% {
+        opacity: 1;
+      }
+
+      50% {
+        opacity: 0.7;
+      }
+
+      100% {
+        opacity: 1;
+      }
     }
 
     .success {
@@ -138,8 +180,10 @@
     <hr style="margin: 20px 0;">
 
     <h3>Option A: NFC Scan</h3>
-    <p style="text-align:center; font-size: 0.9em;">Tap button, then hold card to phone.</p>
-    <button id="scanButton">Start NFC Scan</button>
+    <p style="text-align:center; font-size: 0.9em; margin-bottom: 5px;">Single scan or Continuous Rapid mode.</p>
+
+    <button id="scanButton">Single Scan</button>
+    <button id="rapidScanButton">Start Rapid Scan Mode</button>
 
     <div class="testing-section">
       <h3 style="margin-top:0;">Option B: Desktop Test</h3>
@@ -148,20 +192,29 @@
       <button id="manualSubmit">Submit Manually</button>
     </div>
 
-    <div id="status">Waiting for input...</div>
+    <div id="status">Waiting...</div>
+    <ul id="scanLog"></ul>
   </div>
 
   <script>
     const statusDiv = document.getElementById('status');
+    const scanLog = document.getElementById('scanLog');
     const scanButton = document.getElementById('scanButton');
+    const rapidScanButton = document.getElementById('rapidScanButton');
     const authTokenInput = document.getElementById('authToken');
     const manualInput = document.getElementById('manualInput');
     const manualBtn = document.getElementById('manualSubmit');
 
-    // Check NFC Support (Disable button if not on mobile/Chrome)
+    // State variables for Rapid Scan
+    let nfcController = null;
+    let lastScannedText = null;
+    let lastScanTime = 0;
+
+    // Check NFC Support
     if (!('NDEFReader' in window)) {
-      scanButton.innerText = "NFC Not Supported (Use Option B)";
+      scanButton.innerText = "NFC Not Supported";
       scanButton.disabled = true;
+      rapidScanButton.disabled = true;
     }
 
     // --- Helper: Format Date for API ---
@@ -170,7 +223,6 @@
       const dif = tzo >= 0 ? '+' : '-';
       const pad = (num) => (num < 10 ? '0' : '') + num;
       const padMs = (num) => String(num).padStart(3, '0');
-
       return date.getFullYear() +
         '-' + pad(date.getMonth() + 1) +
         '-' + pad(date.getDate()) +
@@ -181,23 +233,31 @@
         dif + pad(Math.floor(Math.abs(tzo) / 60)) + ':' + pad(Math.abs(tzo) % 60);
     };
 
+    // --- Helper: Log to list (for rapid scan) ---
+    function logResult(message, isError = false) {
+      const li = document.createElement('li');
+      li.innerHTML = message;
+      li.style.color = isError ? 'red' : 'green';
+      // Insert at top
+      scanLog.insertBefore(li, scanLog.firstChild);
+    }
+
     // --- Core Function: Post Data to API ---
-    async function sendToDatabase(staffID) {
+    async function sendToDatabase(staffID, isRapid = false) {
       const token = authTokenInput.value.trim();
       const checkType = document.querySelector('input[name="checkType"]:checked').value;
       const timestamp = toLocalISOString(new Date());
 
       if (!token) {
-        statusDiv.innerHTML = '<span class="error">Error: Authorization Token is missing.</span>';
+        const msg = 'Error: Authorization Token is missing.';
+        if (isRapid) logResult(msg, true);
+        else statusDiv.innerHTML = `<span class="error">${msg}</span>`;
         return;
       }
 
-      if (!staffID) {
-        statusDiv.innerHTML = '<span class="error">Error: No Staff ID found.</span>';
-        return;
+      if (!isRapid) {
+        statusDiv.innerText = `Processing: ${staffID}...`;
       }
-
-      statusDiv.innerText = `Processing Staff ID: ${staffID}\nSending to database...`;
 
       const payload = {
         "Staff": staffID,
@@ -206,83 +266,130 @@
       };
 
       try {
-        // Using the exact URL from your curl request
         const response = await fetch('https://appnostic.dbflex.net/secure/api/v2/90166/Staff%20Check%20In/create.json', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
+            'Authorization': token
           },
           body: JSON.stringify(payload)
         });
 
         if (response.ok) {
-          const result = await response.json();
-          statusDiv.innerHTML = `<span class="success">Success!</span>\nServer Response: ${JSON.stringify(result, null, 2)}`;
+          const msg = `<b>${staffID}</b> checked in.`;
+          if (isRapid) {
+            logResult(msg + " (OK)");
+          } else {
+            statusDiv.innerHTML = `<span class="success">Success! ${msg}</span>`;
+          }
         } else {
           const errorText = await response.text();
-          statusDiv.innerHTML = `<span class="error">API Error (${response.status}):</span> ${errorText}`;
+          const msg = `Error ${staffID}: ${response.status}`;
+          if (isRapid) logResult(msg, true);
+          else statusDiv.innerHTML = `<span class="error">${msg} ${errorText}</span>`;
         }
       } catch (error) {
-        statusDiv.innerHTML = `<span class="error">Network Error:</span> ${error.message}`;
+        const msg = `Network Error ${staffID}`;
+        if (isRapid) logResult(msg, true);
+        else statusDiv.innerHTML = `<span class="error">${msg}: ${error.message}</span>`;
       }
     }
 
-    // --- Logic 1: Manual Desktop Testing ---
-    manualBtn.addEventListener('click', () => {
-      const val = manualInput.value.trim();
-      if (val) {
-        sendToDatabase(val);
-      } else {
-        statusDiv.innerText = "Please enter a Staff ID in the text box.";
-      }
-    });
+    // --- Logic: Handle NFC Reading (Shared) ---
+    const handleReading = ({ message, serialNumber }, isRapid) => {
+      let cardText = null;
 
-    // --- Logic 2: NFC Scanning (Text Record) ---
+      // Parse Text Record
+      for (const record of message.records) {
+        if (record.recordType === "text") {
+          const textDecoder = new TextDecoder(record.encoding || "utf-8");
+          const decoded = textDecoder.decode(record.data);
+          const langCodeLen = new DataView(record.data.buffer).getUint8(0) & 0x3F;
+          const textData = decoded.substring(langCodeLen + 1);
+          cardText = (textData.length > 0) ? textData : decoded;
+          break;
+        }
+      }
+
+      if (!cardText) {
+        if (!isRapid) statusDiv.innerText = "Error: No Text Record found on card.";
+        return;
+      }
+
+      // RAPID SCAN: Check for duplicates
+      if (isRapid) {
+        const now = Date.now();
+        // If it's the SAME card scanned less than 3 seconds ago, ignore it.
+        if (cardText === lastScannedText && (now - lastScanTime < 3000)) {
+          return;
+        }
+        lastScannedText = cardText;
+        lastScanTime = now;
+      }
+
+      // Send
+      sendToDatabase(cardText, isRapid);
+    };
+
+    // --- Logic 1: Single Scan ---
     scanButton.addEventListener('click', async () => {
       try {
         const reader = new NDEFReader();
         await reader.scan();
-        statusDiv.innerText = 'Scanning... Hold card to phone.';
+        statusDiv.innerText = 'Listening for single scan...';
 
-        reader.addEventListener('reading', ({ message, serialNumber }) => {
+        reader.addEventListener('reading', (event) => {
+          handleReading(event, false);
+        });
+      } catch (error) {
+        statusDiv.innerText = 'Error: ' + error;
+      }
+    });
 
-          // We look for the first Text Record in the NDEF message
-          let cardText = null;
+    // --- Logic 2: Rapid Scan ---
+    rapidScanButton.addEventListener('click', async () => {
+      // Toggle OFF if already on
+      if (nfcController) {
+        nfcController.abort();
+        nfcController = null;
+        rapidScanButton.innerText = "Start Rapid Scan Mode";
+        rapidScanButton.classList.remove('scanning');
+        statusDiv.innerText = "Rapid scan stopped.";
+        return;
+      }
 
-          for (const record of message.records) {
-            if (record.recordType === "text") {
-              const textDecoder = new TextDecoder(record.encoding || "utf-8");
-              // Decode the data
-              const decoded = textDecoder.decode(record.data);
+      // Toggle ON
+      nfcController = new AbortController();
+      try {
+        const reader = new NDEFReader();
+        await reader.scan({ signal: nfcController.signal });
 
-              // NOTE: Standard NDEF Text records start with a status byte (language code length).
-              // This logic strips that header to get the clean Staff ID.
-              // If your cards are written as "raw text" without NDEF headers, remove the next 3 lines.
-              const langCodeLen = new DataView(record.data.buffer).getUint8(0) & 0x3F; // Get length of 'en' etc.
-              // Slice off the status byte + language code length
-              // If the decode result looks weird (e.g., "en000241"), try using just `decoded` without slice.
-              // Standard NDEF Text Record parsing:
-              const textData = decoded.substring(langCodeLen + 1); // +1 for the status byte itself (which TextDecoder might map)
+        rapidScanButton.innerText = "Stop Rapid Scan";
+        rapidScanButton.classList.add('scanning');
+        statusDiv.innerText = "Rapid Mode Active: Tap cards continuously.";
+        scanLog.innerHTML = ""; // Clear old logs
 
-              // Fallback: If stripping logic fails or yields empty, use raw decode (depends on how card was written)
-              // For now, we'll try to guess if it looks like a clean ID.
-              cardText = (textData.length > 0) ? textData : decoded;
-              break; // Stop after first text record
-            }
-          }
+        reader.addEventListener('reading', (event) => {
+          handleReading(event, true);
+        });
 
-          if (cardText) {
-            sendToDatabase(cardText);
-          } else {
-            statusDiv.innerText = `Scan detected (UID: ${serialNumber}), but no TEXT record found on card.`;
-          }
+        reader.addEventListener('error', (event) => {
+          statusDiv.innerText = "NFC Error: " + event.message;
         });
 
       } catch (error) {
-        statusDiv.innerText = 'Error starting scan: ' + error;
+        statusDiv.innerText = "Error starting rapid scan: " + error;
+        nfcController = null;
       }
     });
+
+    // --- Logic 3: Manual Desktop ---
+    manualBtn.addEventListener('click', () => {
+      const val = manualInput.value.trim();
+      if (val) sendToDatabase(val, false);
+      else statusDiv.innerText = "Enter ID first.";
+    });
+
   </script>
 
 </body>
