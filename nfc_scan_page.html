@@ -17,8 +17,13 @@
       padding: 20px;
       border-radius: 8px;
       box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-      max-width: 400px;
+      max-width: 450px;
       margin: 0 auto;
+    }
+
+    h1,
+    h3 {
+      text-align: center;
     }
 
     label {
@@ -37,10 +42,15 @@
       box-sizing: border-box;
     }
 
+    /* Toggle Styles */
     .toggle-group {
       margin-top: 10px;
       display: flex;
       gap: 15px;
+      justify-content: center;
+      background: #eee;
+      padding: 10px;
+      border-radius: 4px;
     }
 
     .toggle-group label {
@@ -52,21 +62,40 @@
       cursor: pointer;
     }
 
+    /* Button Styles */
     button {
       width: 100%;
       padding: 12px;
-      margin-top: 20px;
       border: none;
       border-radius: 8px;
       font-size: 16px;
       cursor: pointer;
-      background: #007bff;
       color: white;
       transition: background 0.3s;
+      margin-top: 10px;
     }
 
-    button:disabled {
+    #scanButton {
+      background: #007bff;
+    }
+
+    /* Blue for NFC */
+    #scanButton:disabled {
       background: #ccc;
+    }
+
+    #manualSubmit {
+      background: #28a745;
+    }
+
+    /* Green for Manual */
+
+    /* Testing Section */
+    .testing-section {
+      border: 2px dashed #ccc;
+      padding: 15px;
+      margin-top: 20px;
+      border-radius: 8px;
     }
 
     #status {
@@ -94,7 +123,7 @@
     <h1>Staff Attendance</h1>
 
     <label for="authToken">Authorization Token</label>
-    <input type="password" id="authToken" placeholder="Paste your API token here">
+    <input type="password" id="authToken" placeholder="Paste API token here">
 
     <label>Action Type</label>
     <div class="toggle-group">
@@ -106,26 +135,36 @@
       </label>
     </div>
 
-    <p style="font-size: 0.9em; color: #666;">Enter token, select action, tap button, then scan card.</p>
+    <hr style="margin: 20px 0;">
 
+    <h3>Option A: NFC Scan</h3>
+    <p style="text-align:center; font-size: 0.9em;">Tap button, then hold card to phone.</p>
     <button id="scanButton">Start NFC Scan</button>
 
-    <div id="status">Waiting for scan...</div>
+    <div class="testing-section">
+      <h3 style="margin-top:0;">Option B: Desktop Test</h3>
+      <label for="manualInput">Manual Staff ID</label>
+      <input type="text" id="manualInput" placeholder="e.g., 000241">
+      <button id="manualSubmit">Submit Manually</button>
+    </div>
+
+    <div id="status">Waiting for input...</div>
   </div>
 
   <script>
     const statusDiv = document.getElementById('status');
     const scanButton = document.getElementById('scanButton');
     const authTokenInput = document.getElementById('authToken');
+    const manualInput = document.getElementById('manualInput');
+    const manualBtn = document.getElementById('manualSubmit');
 
-    // Check for Browser Support
+    // Check NFC Support (Disable button if not on mobile/Chrome)
     if (!('NDEFReader' in window)) {
-      statusDiv.innerText = 'Error: NFC is not supported on this device/browser. Please use Chrome on Android.';
+      scanButton.innerText = "NFC Not Supported (Use Option B)";
       scanButton.disabled = true;
     }
 
-    // Helper: Format Date to ISO with Local Timezone (e.g., +02:00)
-    // Standard .toISOString() returns UTC (Z), this keeps local time.
+    // --- Helper: Format Date for API ---
     const toLocalISOString = (date) => {
       const tzo = -date.getTimezoneOffset();
       const dif = tzo >= 0 ? '+' : '-';
@@ -142,26 +181,32 @@
         dif + pad(Math.floor(Math.abs(tzo) / 60)) + ':' + pad(Math.abs(tzo) % 60);
     };
 
-    // Function to Send Data to API
-    async function sendToDatabase(cardUID) {
+    // --- Core Function: Post Data to API ---
+    async function sendToDatabase(staffID) {
       const token = authTokenInput.value.trim();
       const checkType = document.querySelector('input[name="checkType"]:checked').value;
       const timestamp = toLocalISOString(new Date());
 
       if (!token) {
-        statusDiv.innerHTML = '<span class="error">Error: Please enter an Authorization Token.</span>';
+        statusDiv.innerHTML = '<span class="error">Error: Authorization Token is missing.</span>';
         return;
       }
 
-      statusDiv.innerText = `Card Scanned: ${cardUID}\nSending data...`;
+      if (!staffID) {
+        statusDiv.innerHTML = '<span class="error">Error: No Staff ID found.</span>';
+        return;
+      }
+
+      statusDiv.innerText = `Processing Staff ID: ${staffID}\nSending to database...`;
 
       const payload = {
-        "Staff": cardUID, // Uses the NFC Serial Number
+        "Staff": staffID,
         "Timestamp": timestamp,
         "Check In/Out": checkType
       };
 
       try {
+        // Using the exact URL from your curl request
         const response = await fetch('https://appnostic.dbflex.net/secure/api/v2/90166/Staff%20Check%20In/create.json', {
           method: 'POST',
           headers: {
@@ -173,7 +218,7 @@
 
         if (response.ok) {
           const result = await response.json();
-          statusDiv.innerHTML = `<span class="success">Success! Record created.</span>\nResponse: ${JSON.stringify(result)}`;
+          statusDiv.innerHTML = `<span class="success">Success!</span>\nServer Response: ${JSON.stringify(result, null, 2)}`;
         } else {
           const errorText = await response.text();
           statusDiv.innerHTML = `<span class="error">API Error (${response.status}):</span> ${errorText}`;
@@ -183,21 +228,55 @@
       }
     }
 
-    // NFC Logic
+    // --- Logic 1: Manual Desktop Testing ---
+    manualBtn.addEventListener('click', () => {
+      const val = manualInput.value.trim();
+      if (val) {
+        sendToDatabase(val);
+      } else {
+        statusDiv.innerText = "Please enter a Staff ID in the text box.";
+      }
+    });
+
+    // --- Logic 2: NFC Scanning (Text Record) ---
     scanButton.addEventListener('click', async () => {
       try {
         const reader = new NDEFReader();
         await reader.scan();
-        statusDiv.innerText = 'Scanning... Hold card near back of phone.';
+        statusDiv.innerText = 'Scanning... Hold card to phone.';
 
-        reader.addEventListener('reading', event => {
-          // We only need the serial number for the "Staff" field
-          const { serialNumber } = event;
+        reader.addEventListener('reading', ({ message, serialNumber }) => {
 
-          // Sometimes NFC serials have colons (04:A2:...), sometimes API wants clean numbers.
-          // Assuming the API takes the raw ID based on your prompt.
-          // If you need to remove colons, use: serialNumber.replace(/:/g, "")
-          sendToDatabase(serialNumber);
+          // We look for the first Text Record in the NDEF message
+          let cardText = null;
+
+          for (const record of message.records) {
+            if (record.recordType === "text") {
+              const textDecoder = new TextDecoder(record.encoding || "utf-8");
+              // Decode the data
+              const decoded = textDecoder.decode(record.data);
+
+              // NOTE: Standard NDEF Text records start with a status byte (language code length).
+              // This logic strips that header to get the clean Staff ID.
+              // If your cards are written as "raw text" without NDEF headers, remove the next 3 lines.
+              const langCodeLen = new DataView(record.data.buffer).getUint8(0) & 0x3F; // Get length of 'en' etc.
+              // Slice off the status byte + language code length
+              // If the decode result looks weird (e.g., "en000241"), try using just `decoded` without slice.
+              // Standard NDEF Text Record parsing:
+              const textData = decoded.substring(langCodeLen + 1); // +1 for the status byte itself (which TextDecoder might map)
+
+              // Fallback: If stripping logic fails or yields empty, use raw decode (depends on how card was written)
+              // For now, we'll try to guess if it looks like a clean ID.
+              cardText = (textData.length > 0) ? textData : decoded;
+              break; // Stop after first text record
+            }
+          }
+
+          if (cardText) {
+            sendToDatabase(cardText);
+          } else {
+            statusDiv.innerText = `Scan detected (UID: ${serialNumber}), but no TEXT record found on card.`;
+          }
         });
 
       } catch (error) {
